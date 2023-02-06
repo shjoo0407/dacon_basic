@@ -139,3 +139,11 @@ train.next_arrive_time.value_counts()
 plt.figure(figsize=(25,4))
 sns.countplot(data=train, x="next_arrive_time")
 
+train = train.sort_values(by='next_arrive_time')
+
+train['next_arrive_time'].describe()
+
+"""이상치로 보이는 값들은 좀 없앨 필요가 있어 보인다.
+이상치를 어떻게 판별할 수 있을까?
+"""
+
