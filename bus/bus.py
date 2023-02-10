@@ -15,6 +15,9 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+import lightgbm as lgb
+import folium
+
 train = pd.read_csv('/content/drive/MyDrive/bus/train.csv')
 test = pd.read_csv('/content/drive/MyDrive/bus/test.csv')
 submission = pd.read_csv('/content/drive/MyDrive/bus/submission_제출양식.csv')
@@ -79,6 +82,65 @@ test : 총 100대의 버스가 존재한다.
 
 
 """
+
+train[['route_id','vh_id']]
+# 중복 되는게 많다.
+
+train[['route_id','vh_id']].drop_duplicates().groupby('route_id').count()
+# 많게는 15개, 적게는 1개 버스가 운행한다.
+
+# 노선별로 next_arrive_time 을 확인한다
+train[['route_id','next_arrive_time']].groupby('route_id').mean()
+
+# 노선에 따라 평균이 꽤 차이가 나는 것을 확인한다.
+
+map_data = train[['route_id','now_latitude','now_longitude','now_station']]
+
+# 405136521 = 제일 시간이 오래 걸린 노선.
+map_bus_route_max = map_data[map_data['route_id'] == 405136521].drop_duplicates("now_station")
+# 405320122 = 제일 시간이 짧게 걸린 노선
+map_bus_route_min = map_data[map_data['route_id'] == 405320122].drop_duplicates("now_station")
+
+
+
+
+# 제일 시간이 짧게 걸린 노선을 보면
+
+map_osm_min = folium.Map(location=[33.4134, 126.5190], zoom_start = 10.5)
+
+for item in map_bus_route_min.index:
+    lat = map_bus_route_min.loc[item,'now_latitude']
+    long = map_bus_route_min.loc[item,'now_longitude']
+    
+    folium.Marker([lat,long], popup = map_bus_route_min.loc[item,'now_station'],
+                      icon = folium.Icon(color = 'red', icon = 'info-sign')
+                      ).add_to(map_osm_min)
+
+map_osm_min.save('index.html')
+
+map_osm_min
+
+
+
+# 제일 시간이 길게 걸린 노선을 보면
+
+map_osm_max = folium.Map(location=[33.4134, 126.5190], zoom_start = 10.5)
+
+
+
+for item in map_bus_route_max.index:
+    lat = map_bus_route_max.loc[item,'now_latitude']
+    long = map_bus_route_max.loc[item,'now_longitude']
+    
+    folium.Marker([lat,long], popup = map_bus_route_max.loc[item,'now_station'],
+                      icon = folium.Icon(color = 'red', icon = 'info-sign')
+                      ).add_to(map_osm_max)
+
+map_osm_max.save('index.html')
+
+map_osm_max
+
+
 
 train.route_nm.unique()
 
@@ -145,5 +207,63 @@ train['next_arrive_time'].describe()
 
 """이상치로 보이는 값들은 좀 없앨 필요가 있어 보인다.
 이상치를 어떻게 판별할 수 있을까?
+
+data cleansing & pre-processing
 """
+
+# now_arrive_time 에 문자를 빼서 바로 수치형으로 바꿔줘야 한다.
+train.now_arrive_time
+
+train['now_arrive_time'] = train['now_arrive_time'].str.slice(stop=-1).astype('int')
+
+train.info()
+
+test['now_arrive_time'] = test['now_arrive_time'].str.slice(stop=-1).astype('int')
+
+test.info()
+
+"""Modeling"""
+
+# features에 이것만 넣어서 해보자.
+
+features = ['now_latitude','now_longitude','now_arrive_time','distance']
+target = ['next_arrive_time']
+
+X_train,X_test,y_train = train[features],test[features],train[target]
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+
+# dictionary 만들어서 모델을 모아두기.
+model_dict = {
+    'linear':LinearRegression(),
+    'rf' : RandomForestRegressor(random_state=0, n_jobs=-1),
+    'lgbm':lgb.LGBMRegressor(random_state=0)
+}
+
+model_dict
+
+model_dict.keys()
+
+model_dict['linear']
+
+model_result = {}
+
+for key in model_dict.keys():
+  print('##### 훈련중 #####')
+  model_dict[key].fit(X_train,y_train)
+  print('##### 예측중 #####')
+  model_result[key] = model_dict[key].predict(X_test)
+
+lr_submit=submission.copy()
+rf_submit=submission.copy()
+lgbm_submit = submission.copy()
+
+lr_submit['next_arrive_time']= model_result['linear']
+rf_submit['next_arrive_time']= model_result['rf']
+lgbm_submit['next_arrive_time']= model_result['lgbm']
+
+lr_submit.to_csv('lr_submit.csv',index=False)
+rf_submit.to_csv('rf_submit.csv',index=False)
+lgbm_submit.to_csv('lgbm_submit.csv',index=False)
 
